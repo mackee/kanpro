@@ -19,23 +19,29 @@ import (
 
 const (
     LOG_FILENAME = "log.txt"
+    IM_KAYAC_URL = "http://im.kayac.com/api/post/macopy"
 )
 
 var (
     repairingNdockId = make(map[int16]bool)
+    missionDeckId    = make(map[int16]bool)
 )
 
-func notifyMissionComplete(d time.Duration) {
-    time.Sleep(d)
-    PostForm(IM_KAYAC_URL, url.Values{"message": {"艦隊が遠征から帰還しました"}})
+func notifyMissionComplete(d time.Duration, deckId int16) {
+    if missionDeckId[deckId] != true {
+        missionDeckId[deckId] = true
+        time.Sleep(d)
+        PostForm(IM_KAYAC_URL, url.Values{"message": {"艦隊が遠征から帰還しました"}})
+        delete(missionDeckId, deckId)
+    }
 }
 
-func notifyRepairComplete(d time.Duration, NdockId int16) {
-    if repairingNdockId[NdockId] != true {
-        repairingNdockId[NdockId] = true
+func notifyRepairComplete(d time.Duration, ndockId int16) {
+    if repairingNdockId[ndockId] != true {
+        repairingNdockId[ndockId] = true
         time.Sleep(d)
         PostForm(IM_KAYAC_URL, url.Values{"message": {"艦娘の修理が完了しました"}})
-        delete(repairingNdockId, NdockId)
+        delete(repairingNdockId, ndockId)
     }
 }
 
@@ -93,16 +99,38 @@ func main() {
                     }
 
                 case "/kcsapi/api_req_mission/start":
-                    var d kcsapi.MissionStartData
-                    json.Unmarshal([]byte(jsonBody), &d)
+                    jsonBody = strings.Replace(jsonBody, "ï", "", 1)
+                    var d kcsapi.NdockData
+                    f.Write([]byte(jsonBody))
+                    err := json.Unmarshal([]byte(jsonBody), &d)
+                    if err != nil {
+                        f.Write([]byte(fmt.Sprintf("%+v\n", err)))
+                    }
                     f.Write([]byte(fmt.Sprintf("%+v\n", d)))
                     f.Write([]byte("\n"))
-                    timeEpoch := d.ApiData.CompleteTime / 1000
-                    if timeEpoch != 0 {
-                        duration := time.Unix(timeEpoch, 0).Sub(time.Now())
-                        go notifyMissionComplete(duration)
+                    //timeEpoch := d.ApiData.Complatetime / 1000
+                    //if timeEpoch != 0 {
+                    //    duration := time.Unix(timeEpoch, 0).Sub(time.Now())
+                    //    f.Write([]byte("mission start\n"))
+                    //    go notifyMissionComplete(duration)
+                    //}
+                case "/kcsapi/api_get_member/ship3":
+                    var d kcsapi.Ship3Data
+                    err := json.Unmarshal([]byte(jsonBody), &d)
+                    if err != nil {
+                        f.Write([]byte(fmt.Sprintf("%+v\n", err)))
                     }
-
+                    for i := 0; i < len(d.ApiData.DeckData); i++ {
+                        deck := d.ApiData.DeckData[i]
+                        missions := deck.Mission
+                        if missions[0] == 1 {
+                            completeEpoch := missions[2] / 1000
+                            duration := time.Unix(completeEpoch, 0).Sub(time.Now())
+                            f.Write([]byte(fmt.Sprintf("%+v\n", duration)))
+                            go notifyMissionComplete(duration, deck.Id)
+                        }
+                    }
+                    f.Write([]byte("\n"))
                 default:
                     //f.Write([]byte(jsonBody))
                     f.Write([]byte("\n"))
